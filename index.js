@@ -5,12 +5,13 @@ const {
   REST,
   Routes,
   SlashCommandBuilder,
-  AttachmentBuilder
+  AttachmentBuilder,
+  PermissionFlagsBits
 } = require("discord.js");
 
-// ==============================
-// RENDER WEB SERVER
-// ==============================
+// ==========================================
+// WEB SERVER - FOR RENDER
+// ==========================================
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -23,9 +24,9 @@ app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
-// ==============================
+// ==========================================
 // ENVIRONMENT VARIABLES
-// ==============================
+// ==========================================
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const STOCK_CHANNEL_ID = process.env.STOCK_CHANNEL_ID;
@@ -40,9 +41,9 @@ if (!STOCK_CHANNEL_ID) {
   process.exit(1);
 }
 
-// ==============================
+// ==========================================
 // DESTINATION CHANNELS
-// ==============================
+// ==========================================
 
 const DESTINATIONS = {
   crunchyroll: "1552953210640146453",
@@ -58,19 +59,22 @@ const DESTINATIONS = {
   viptool: "1552959272919506986"
 };
 
-// ==============================
+// ==========================================
 // BRANDING
-// ==============================
+// ==========================================
 
-const BRANDING = `
-MADE BY OXAAM REWARDS 💲
-FOUNDER - dhruvop263
-Discord: https://discord.gg/8uGcS6V4vV
-`;
+const BRANDING = [
+  "",
+  "----------------------------------------",
+  "MADE BY OXAAM REWARDS 💲",
+  "FOUNDER - dhruvop263",
+  "Discord: https://discord.gg/8uGcS6V4vV",
+  "----------------------------------------"
+].join("\n");
 
-// ==============================
+// ==========================================
 // DISCORD CLIENT
-// ==============================
+// ==========================================
 
 const client = new Client({
   intents: [
@@ -80,25 +84,46 @@ const client = new Client({
   ]
 });
 
-// ==============================
+// ==========================================
 // SLASH COMMANDS
-// ==============================
+// ==========================================
 
-const commands = Object.keys(DESTINATIONS).map((name) =>
+const stockCommands = Object.keys(DESTINATIONS).map((name) =>
   new SlashCommandBuilder()
     .setName(name)
     .setDescription(`Send latest ${name} text stock`)
     .toJSON()
 );
 
-// ==============================
+const msgCommand = new SlashCommandBuilder()
+  .setName("msg")
+  .setDescription("Send a custom message through the bot")
+  .addStringOption((option) =>
+    option
+      .setName("message")
+      .setDescription("Message you want the bot to send")
+      .setRequired(true)
+  )
+  .setDefaultMemberPermissions(
+    PermissionFlagsBits.ManageMessages.toString()
+  )
+  .toJSON();
+
+const commands = [
+  ...stockCommands,
+  msgCommand
+];
+
+// ==========================================
 // BOT READY
-// ==============================
+// ==========================================
 
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
+  const rest = new REST({
+    version: "10"
+  }).setToken(TOKEN);
 
   try {
     await rest.put(
@@ -115,12 +140,58 @@ client.once("ready", async () => {
   }
 });
 
-// ==============================
-// COMMAND HANDLER
-// ==============================
+// ==========================================
+// INTERACTION HANDLER
+// ==========================================
 
 client.on("interactionCreate", async (interaction) => {
+
   if (!interaction.isChatInputCommand()) return;
+
+  // ========================================
+  // /MSG COMMAND
+  // ========================================
+
+  if (interaction.commandName === "msg") {
+
+    const message =
+      interaction.options.getString("message");
+
+    if (!message) {
+      return interaction.reply({
+        content: "❌ Please enter a message.",
+        ephemeral: true
+      });
+    }
+
+    try {
+
+      await interaction.channel.send({
+        content: message
+      });
+
+      await interaction.reply({
+        content: "✅ Message sent successfully!",
+        ephemeral: true
+      });
+
+    } catch (error) {
+
+      console.error("❌ /msg error:");
+      console.error(error);
+
+      await interaction.reply({
+        content: "❌ I couldn't send the message.",
+        ephemeral: true
+      });
+    }
+
+    return;
+  }
+
+  // ========================================
+  // STOCK COMMANDS
+  // ========================================
 
   const commandName = interaction.commandName;
   const targetChannelId = DESTINATIONS[commandName];
@@ -138,13 +209,12 @@ client.on("interactionCreate", async (interaction) => {
 
   try {
 
-    // ==========================
+    // ======================================
     // GET STOCK CHANNEL
-    // ==========================
+    // ======================================
 
-    const stockChannel = await client.channels.fetch(
-      STOCK_CHANNEL_ID
-    );
+    const stockChannel =
+      await client.channels.fetch(STOCK_CHANNEL_ID);
 
     if (!stockChannel || !stockChannel.isTextBased()) {
       return interaction.editReply(
@@ -152,13 +222,12 @@ client.on("interactionCreate", async (interaction) => {
       );
     }
 
-    // ==========================
+    // ======================================
     // GET TARGET CHANNEL
-    // ==========================
+    // ======================================
 
-    const targetChannel = await client.channels.fetch(
-      targetChannelId
-    );
+    const targetChannel =
+      await client.channels.fetch(targetChannelId);
 
     if (!targetChannel || !targetChannel.isTextBased()) {
       return interaction.editReply(
@@ -166,31 +235,35 @@ client.on("interactionCreate", async (interaction) => {
       );
     }
 
-    // ==========================
-    // GET RECENT MESSAGES
-    // ==========================
+    // ======================================
+    // FETCH RECENT STOCK MESSAGES
+    // ======================================
 
-    const messages = await stockChannel.messages.fetch({
-      limit: 50
-    });
+    const messages =
+      await stockChannel.messages.fetch({
+        limit: 50
+      });
 
-    // ==========================
-    // FIND LATEST TXT FILE
-    // ==========================
+    // ======================================
+    // FIND LATEST .TXT FILE
+    // ======================================
 
     const stockMessage = messages.find(
       (message) => {
-        if (message.author.bot) return false;
 
-        for (const attachment of message.attachments.values()) {
-          const name = attachment.name || "";
-
-          if (name.toLowerCase().endsWith(".txt")) {
-            return true;
-          }
+        if (message.author.bot) {
+          return false;
         }
 
-        return false;
+        return [...message.attachments.values()].some(
+          (attachment) => {
+            const name = attachment.name || "";
+
+            return name
+              .toLowerCase()
+              .endsWith(".txt");
+          }
+        );
       }
     );
 
@@ -200,103 +273,126 @@ client.on("interactionCreate", async (interaction) => {
       );
     }
 
-    // ==========================
-    // PROCESS TXT FILES
-    // ==========================
+    // ======================================
+    // PROCESS FILES
+    // ======================================
 
     let processedCount = 0;
 
-    for (const attachment of stockMessage.attachments.values()) {
+    for (
+      const attachment
+      of stockMessage.attachments.values()
+    ) {
 
-      const filename = attachment.name || "stock.txt";
+      const originalFilename =
+        attachment.name || "stock.txt";
 
-      if (!filename.toLowerCase().endsWith(".txt")) {
+      // Only process TXT files
+      if (
+        !originalFilename
+          .toLowerCase()
+          .endsWith(".txt")
+      ) {
         continue;
       }
 
-      // ========================
+      // ====================================
       // DOWNLOAD FILE
-      // ========================
+      // ====================================
 
-      const response = await fetch(attachment.url);
+      const response =
+        await fetch(attachment.url);
 
       if (!response.ok) {
         console.error(
-          `Failed to download ${filename}`
+          `❌ Failed to download ${originalFilename}`
         );
+
         continue;
       }
 
-      const fileBuffer = Buffer.from(
-        await response.arrayBuffer()
-      );
+      const fileBuffer =
+        Buffer.from(
+          await response.arrayBuffer()
+        );
 
-      const originalText = fileBuffer.toString("utf8");
+      const originalText =
+        fileBuffer.toString("utf8");
 
-      // ========================
+      // ====================================
       // REMOVE FIRST 6 LINES
-      // ========================
+      // ====================================
 
-      const lines = originalText.split(/\r?\n/);
+      const lines =
+        originalText.split(/\r?\n/);
 
-      const remainingLines = lines.slice(6);
+      const remainingLines =
+        lines.slice(6);
 
-      const cleanedText = remainingLines.join("\n");
+      const cleanedText =
+        remainingLines.join("\n").trim();
 
-      // ========================
-      // ADD BRANDING
-      // ========================
+      // ====================================
+      // ADD BRANDING INSIDE FILE
+      // ====================================
 
       const finalText =
-        cleanedText.trimEnd() +
-        "\n\n" +
-        "----------------------------------------\n" +
-        BRANDING.trim() +
-        "\n----------------------------------------\n";
+        cleanedText + BRANDING;
 
-      // ========================
+      // ====================================
+      // AUTOMATIC FILENAME
+      // ====================================
+
+      const outputFilename =
+        `${commandName.toUpperCase()}-by-oxaam.txt`;
+
+      // ====================================
       // CREATE NEW FILE
-      // ========================
+      // ====================================
 
-      const outputFile = new AttachmentBuilder(
-        Buffer.from(finalText, "utf8"),
-        {
-          name: filename
-        }
-      );
+      const outputFile =
+        new AttachmentBuilder(
+          Buffer.from(finalText, "utf8"),
+          {
+            name: outputFilename
+          }
+        );
 
-      // ========================
-      // SEND TO TARGET CHANNEL
-      // ========================
+      // ====================================
+      // SEND PROCESSED FILE
+      // ====================================
 
       await targetChannel.send({
         content:
           `📦 **${commandName.toUpperCase()} STOCK**\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
-          `MADE BY OXAAM REWARDS 💲`,
+          `━━━━━━━━━━━━━━━━━━━━`,
         files: [outputFile]
       });
 
       processedCount++;
     }
 
-    // ==========================
+    // ======================================
     // RESULT
-    // ==========================
+    // ======================================
 
     if (processedCount === 0) {
+
       return interaction.editReply(
         "❌ No valid .txt file could be processed."
       );
     }
 
     await interaction.editReply(
-      `✅ Successfully processed ${processedCount} file(s) and sent them to <#${targetChannelId}>.`
+      `✅ Successfully processed ${processedCount} file(s).\n` +
+      `📁 First 6 lines removed.\n` +
+      `💲 Branding added.\n` +
+      `📤 Sent to <#${targetChannelId}>.`
     );
 
   } catch (error) {
 
-    console.error("❌ ERROR:");
+    console.error("❌ STOCK PROCESSING ERROR:");
     console.error(error);
 
     await interaction.editReply(
@@ -305,8 +401,8 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ==============================
+// ==========================================
 // LOGIN
-// ==============================
+// ==========================================
 
 client.login(TOKEN);
