@@ -189,24 +189,3 @@ client.on("interactionCreate", async (interaction) => {
   // ========================================
   // STOCK COMMANDS
  
-// ==========================================
-// SAFE HEARTBEAT / UPTIME STATUS
-// ==========================================
-
-const startTime = Date.now();
-
-setInterval(() => {
-  const uptimeSeconds = Math.floor(
-    (Date.now() - startTime) / 1000
-  );
-
-  const hours = Math.floor(uptimeSeconds / 3600);
-  const minutes = Math.floor(
-    (uptimeSeconds % 3600) / 60
-  );
-  const seconds = uptimeSeconds % 60;
-
-  console.log(
-    `💓 Heartbeat | Bot is running | Uptime: ${hours}h ${minutes}m ${seconds}s`
-  );
-}, 5 * 60 * 1000);
