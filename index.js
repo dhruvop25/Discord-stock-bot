@@ -25,8 +25,8 @@ const STOCK_CHANNEL_ID = process.env.STOCK_CHANNEL_ID;
 const OUTPUT_CHANNEL_ID = process.env.OUTPUT_CHANNEL_ID;
 
 const BRANDING = `\n\n━━━━━━━━━━━━━━━━━━━━\n
-⭐ XYZ Rewards
-🔗 Discord: https://discord.gg/YOUR-LINK
+⭐ MADE BY OXAAM REWARDS 💲 
+🔗 Discord : https://discord.gg/WB6u47HutT
 ━━━━━━━━━━━━━━━━━━━━\n`;
 
 // ===============================
