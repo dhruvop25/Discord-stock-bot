@@ -4,32 +4,45 @@ const {
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  AttachmentBuilder
 } = require("discord.js");
+
+// ==============================
+// RENDER WEB SERVER
+// ==============================
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("Oxaam Rewards Bot is online!");
+  res.send("OXAAM REWARDS STOCK BOT IS ONLINE!");
 });
 
 app.listen(PORT, () => {
   console.log(`Web server running on port ${PORT}`);
 });
 
+// ==============================
+// ENVIRONMENT VARIABLES
+// ==============================
+
 const TOKEN = process.env.DISCORD_TOKEN;
 const STOCK_CHANNEL_ID = process.env.STOCK_CHANNEL_ID;
 
 if (!TOKEN) {
-  console.error("DISCORD_TOKEN is missing!");
+  console.error("❌ DISCORD_TOKEN is missing!");
   process.exit(1);
 }
 
 if (!STOCK_CHANNEL_ID) {
-  console.error("STOCK_CHANNEL_ID is missing!");
+  console.error("❌ STOCK_CHANNEL_ID is missing!");
   process.exit(1);
 }
+
+// ==============================
+// DESTINATION CHANNELS
+// ==============================
 
 const DESTINATIONS = {
   crunchyroll: "1552953210640146453",
@@ -45,9 +58,19 @@ const DESTINATIONS = {
   viptool: "1552959272919506986"
 };
 
-const BRANDING = `MADE BY OXAAM REWARDS 💲
+// ==============================
+// BRANDING
+// ==============================
+
+const BRANDING = `
+MADE BY OXAAM REWARDS 💲
 FOUNDER - dhruvop263
-Discord: https://discord.gg/8uGcS6V4vV`;
+Discord: https://discord.gg/8uGcS6V4vV
+`;
+
+// ==============================
+// DISCORD CLIENT
+// ==============================
 
 const client = new Client({
   intents: [
@@ -57,97 +80,233 @@ const client = new Client({
   ]
 });
 
+// ==============================
+// SLASH COMMANDS
+// ==============================
+
 const commands = Object.keys(DESTINATIONS).map((name) =>
   new SlashCommandBuilder()
     .setName(name)
-    .setDescription(`Send the latest ${name} stock file`)
+    .setDescription(`Send latest ${name} text stock`)
     .toJSON()
 );
 
+// ==============================
+// BOT READY
+// ==============================
+
 client.once("ready", async () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
   try {
     await rest.put(
       Routes.applicationCommands(client.user.id),
-      { body: commands }
+      {
+        body: commands
+      }
     );
 
-    console.log("Slash commands registered successfully!");
+    console.log("✅ Slash commands registered successfully!");
   } catch (error) {
-    console.error("Slash command registration error:", error);
+    console.error("❌ Slash command registration error:");
+    console.error(error);
   }
 });
+
+// ==============================
+// COMMAND HANDLER
+// ==============================
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const commandName = interaction.commandName;
-  const targetId = DESTINATIONS[commandName];
+  const targetChannelId = DESTINATIONS[commandName];
 
-  if (!targetId) {
+  if (!targetChannelId) {
     return interaction.reply({
       content: "❌ Unknown command.",
       ephemeral: true
     });
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({
+    ephemeral: true
+  });
 
   try {
-    const stockChannel = await client.channels.fetch(STOCK_CHANNEL_ID);
-    const targetChannel = await client.channels.fetch(targetId);
 
-    if (!stockChannel || !targetChannel) {
+    // ==========================
+    // GET STOCK CHANNEL
+    // ==========================
+
+    const stockChannel = await client.channels.fetch(
+      STOCK_CHANNEL_ID
+    );
+
+    if (!stockChannel || !stockChannel.isTextBased()) {
       return interaction.editReply(
-        "❌ Stock channel or target channel was not found."
+        "❌ Stock channel not found."
       );
     }
 
-    const messages = await stockChannel.messages.fetch({ limit: 50 });
+    // ==========================
+    // GET TARGET CHANNEL
+    // ==========================
+
+    const targetChannel = await client.channels.fetch(
+      targetChannelId
+    );
+
+    if (!targetChannel || !targetChannel.isTextBased()) {
+      return interaction.editReply(
+        "❌ Target channel not found."
+      );
+    }
+
+    // ==========================
+    // GET RECENT MESSAGES
+    // ==========================
+
+    const messages = await stockChannel.messages.fetch({
+      limit: 50
+    });
+
+    // ==========================
+    // FIND LATEST TXT FILE
+    // ==========================
 
     const stockMessage = messages.find(
-      (message) =>
-        !message.author.bot &&
-        message.attachments &&
-        message.attachments.size > 0
+      (message) => {
+        if (message.author.bot) return false;
+
+        for (const attachment of message.attachments.values()) {
+          const name = attachment.name || "";
+
+          if (name.toLowerCase().endsWith(".txt")) {
+            return true;
+          }
+        }
+
+        return false;
+      }
     );
 
     if (!stockMessage) {
       return interaction.editReply(
-        "❌ No stock file was found in the stock channel."
+        "❌ No .txt stock file found in the stock channel."
       );
     }
 
-    const files = [];
+    // ==========================
+    // PROCESS TXT FILES
+    // ==========================
+
+    let processedCount = 0;
 
     for (const attachment of stockMessage.attachments.values()) {
-      files.push({
-        attachment: attachment.url,
-        name: attachment.name || "stock.txt"
+
+      const filename = attachment.name || "stock.txt";
+
+      if (!filename.toLowerCase().endsWith(".txt")) {
+        continue;
+      }
+
+      // ========================
+      // DOWNLOAD FILE
+      // ========================
+
+      const response = await fetch(attachment.url);
+
+      if (!response.ok) {
+        console.error(
+          `Failed to download ${filename}`
+        );
+        continue;
+      }
+
+      const fileBuffer = Buffer.from(
+        await response.arrayBuffer()
+      );
+
+      const originalText = fileBuffer.toString("utf8");
+
+      // ========================
+      // REMOVE FIRST 6 LINES
+      // ========================
+
+      const lines = originalText.split(/\r?\n/);
+
+      const remainingLines = lines.slice(6);
+
+      const cleanedText = remainingLines.join("\n");
+
+      // ========================
+      // ADD BRANDING
+      // ========================
+
+      const finalText =
+        cleanedText.trimEnd() +
+        "\n\n" +
+        "----------------------------------------\n" +
+        BRANDING.trim() +
+        "\n----------------------------------------\n";
+
+      // ========================
+      // CREATE NEW FILE
+      // ========================
+
+      const outputFile = new AttachmentBuilder(
+        Buffer.from(finalText, "utf8"),
+        {
+          name: filename
+        }
+      );
+
+      // ========================
+      // SEND TO TARGET CHANNEL
+      // ========================
+
+      await targetChannel.send({
+        content:
+          `📦 **${commandName.toUpperCase()} STOCK**\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `MADE BY OXAAM REWARDS 💲`,
+        files: [outputFile]
       });
+
+      processedCount++;
     }
 
-    await targetChannel.send({
-      content:
-        `📦 **${commandName.toUpperCase()} STOCK**\n\n` +
-        `${BRANDING}`,
-      files
-    });
+    // ==========================
+    // RESULT
+    // ==========================
+
+    if (processedCount === 0) {
+      return interaction.editReply(
+        "❌ No valid .txt file could be processed."
+      );
+    }
 
     await interaction.editReply(
-      `✅ ${commandName.toUpperCase()} stock sent successfully!`
+      `✅ Successfully processed ${processedCount} file(s) and sent them to <#${targetChannelId}>.`
     );
 
   } catch (error) {
+
+    console.error("❌ ERROR:");
     console.error(error);
 
     await interaction.editReply(
-      "❌ Something went wrong. Check the Render logs."
+      "❌ Something went wrong while processing the stock file."
     );
   }
 });
+
+// ==============================
+// LOGIN
+// ==============================
 
 client.login(TOKEN);
