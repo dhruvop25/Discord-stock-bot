@@ -82,7 +82,66 @@ const client = new Client({
 });
 
 // ==========================================
-// STOCK SLASH COMMANDS
+// LATEST STOCK FILE
+// ==========================================
+
+let latestStock = null;
+
+// ==========================================
+// CHECK TXT ATTACHMENTS
+// ==========================================
+
+function getTxtAttachments(message) {
+  if (!message || message.author?.bot) {
+    return [];
+  }
+
+  return [...message.attachments.values()].filter(
+    (attachment) => {
+      const name = attachment.name || "";
+
+      return name
+        .toLowerCase()
+        .endsWith(".txt");
+    }
+  );
+}
+
+// ==========================================
+// REMEMBER LATEST STOCK
+// ==========================================
+
+function rememberStock(message) {
+  if (!message) return;
+
+  if (message.channelId !== STOCK_CHANNEL_ID) {
+    return;
+  }
+
+  const attachments = getTxtAttachments(message);
+
+  if (attachments.length === 0) {
+    return;
+  }
+
+  latestStock = {
+    messageId: message.id,
+    createdTimestamp: message.createdTimestamp,
+    attachments: attachments.map((attachment) => ({
+      url: attachment.url,
+      name: attachment.name || "stock.txt"
+    }))
+  };
+
+  console.log(
+    `📦 New latest stock detected: ${latestStock.attachments
+      .map((a) => a.name)
+      .join(", ")}`
+  );
+}
+
+// ==========================================
+// SLASH COMMANDS
 // ==========================================
 
 const stockCommands = Object.keys(DESTINATIONS).map((name) =>
@@ -91,10 +150,6 @@ const stockCommands = Object.keys(DESTINATIONS).map((name) =>
     .setDescription(`Send latest ${name} text stock`)
     .toJSON()
 );
-
-// ==========================================
-// /MSG COMMAND
-// ==========================================
 
 const msgCommand = new SlashCommandBuilder()
   .setName("msg")
@@ -126,7 +181,9 @@ setInterval(() => {
     (Date.now() - startTime) / 1000
   );
 
-  const hours = Math.floor(uptimeSeconds / 3600);
+  const hours = Math.floor(
+    uptimeSeconds / 3600
+  );
 
   const minutes = Math.floor(
     (uptimeSeconds % 3600) / 60
@@ -146,6 +203,10 @@ setInterval(() => {
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
+  // ----------------------------------------
+  // REGISTER COMMANDS
+  // ----------------------------------------
+
   const rest = new REST({
     version: "10"
   }).setToken(TOKEN);
@@ -161,12 +222,87 @@ client.once("ready", async () => {
     console.log(
       "✅ Slash commands registered successfully!"
     );
-
   } catch (error) {
     console.error(
       "❌ Slash command registration error:"
     );
+    console.error(error);
+  }
 
+  // ----------------------------------------
+  // RECOVER LATEST STOCK AFTER RESTART
+  // ----------------------------------------
+
+  try {
+    const stockChannel =
+      await client.channels.fetch(
+        STOCK_CHANNEL_ID
+      );
+
+    if (
+      stockChannel &&
+      stockChannel.isTextBased()
+    ) {
+      const messages =
+        await stockChannel.messages.fetch({
+          limit: 100
+        });
+
+      const stockMessages =
+        [...messages.values()]
+          .filter((message) => {
+            return getTxtAttachments(message).length > 0;
+          })
+          .sort(
+            (a, b) =>
+              b.createdTimestamp -
+              a.createdTimestamp
+          );
+
+      if (stockMessages.length > 0) {
+        rememberStock(stockMessages[0]);
+
+        console.log(
+          `📦 Recovered latest stock after restart: ${stockMessages[0].id}`
+        );
+      } else {
+        console.log(
+          "📭 No TXT stock found during startup."
+        );
+      }
+    }
+  } catch (error) {
+    console.error(
+      "❌ Could not recover latest stock:"
+    );
+    console.error(error);
+  }
+});
+
+// ==========================================
+// NEW MESSAGE = NEW STOCK
+// ==========================================
+
+client.on("messageCreate", (message) => {
+  rememberStock(message);
+});
+
+// ==========================================
+// EDITED MESSAGE = POSSIBLY NEW STOCK
+// ==========================================
+
+client.on("messageUpdate", async (oldMessage, newMessage) => {
+  try {
+    const fullMessage =
+      newMessage.partial
+        ? await newMessage.fetch()
+        : newMessage;
+
+    rememberStock(fullMessage);
+  } catch (error) {
+    console.error(
+      "❌ Error checking updated stock message:"
+    );
     console.error(error);
   }
 });
@@ -198,7 +334,6 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     try {
-
       await interaction.channel.send({
         content: message
       });
@@ -209,7 +344,6 @@ client.on("interactionCreate", async (interaction) => {
       });
 
     } catch (error) {
-
       console.error("❌ /msg error:");
       console.error(error);
 
@@ -246,24 +380,6 @@ client.on("interactionCreate", async (interaction) => {
   try {
 
     // ======================================
-    // STOCK CHANNEL
-    // ======================================
-
-    const stockChannel =
-      await client.channels.fetch(
-        STOCK_CHANNEL_ID
-      );
-
-    if (
-      !stockChannel ||
-      !stockChannel.isTextBased()
-    ) {
-      return interaction.editReply(
-        "❌ Stock channel not found."
-      );
-    }
-
-    // ======================================
     // TARGET CHANNEL
     // ======================================
 
@@ -282,92 +398,36 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ======================================
-    // FETCH RECENT MESSAGES
+    // CHECK LATEST STOCK
     // ======================================
 
-    const messages =
-      await stockChannel.messages.fetch({
-        limit: 50
-      });
-
-    // ======================================
-    // FIND THE NEWEST .TXT MESSAGE
-    // ======================================
-
-    const stockMessages =
-      [...messages.values()]
-        .filter((message) => {
-
-          if (message.author.bot) {
-            return false;
-          }
-
-          return [
-            ...message.attachments.values()
-          ].some((attachment) => {
-
-            const name =
-              attachment.name || "";
-
-            return name
-              .toLowerCase()
-              .endsWith(".txt");
-          });
-
-        })
-        .sort(
-          (a, b) =>
-            b.createdTimestamp -
-            a.createdTimestamp
-        );
-
-    const stockMessage =
-      stockMessages[0];
-
-    // ======================================
-    // NO FILE
-    // ======================================
-
-    if (!stockMessage) {
+    if (!latestStock) {
       return interaction.editReply(
-        "❌ No .txt stock file found in the stock channel."
+        "❌ No stock file has been uploaded yet."
       );
     }
 
-    // ======================================
-    // PROCESS FILES
-    // ======================================
+    console.log(
+      `📤 Sending latest stock: ${latestStock.messageId}`
+    );
 
     let processedCount = 0;
 
+    // ======================================
+    // PROCESS LATEST ATTACHMENTS
+    // ======================================
+
     for (
       const attachment
-      of stockMessage.attachments.values()
+      of latestStock.attachments
     ) {
-
-      const originalFilename =
-        attachment.name || "stock.txt";
-
-      // Only TXT files
-      if (
-        !originalFilename
-          .toLowerCase()
-          .endsWith(".txt")
-      ) {
-        continue;
-      }
-
-      // ====================================
-      // DOWNLOAD FILE
-      // ====================================
 
       const response =
         await fetch(attachment.url);
 
       if (!response.ok) {
-
         console.error(
-          `❌ Failed to download ${originalFilename}`
+          `❌ Failed to download ${attachment.name}`
         );
 
         continue;
@@ -392,14 +452,14 @@ client.on("interactionCreate", async (interaction) => {
         lines.slice(6);
 
       // ====================================
-      // BRANDING IN PLACE OF FIRST 6 LINES
+      // BRANDING AT TOP
       // ====================================
 
       const topBranding =
         BRANDING + "\n\n";
 
       // ====================================
-      // BRANDING AT END
+      // BRANDING AT BOTTOM
       // ====================================
 
       const bottomBranding =
@@ -408,7 +468,7 @@ client.on("interactionCreate", async (interaction) => {
         "\n----------------------------------------";
 
       // ====================================
-      // FINAL FILE
+      // FINAL TEXT
       // ====================================
 
       const finalText =
@@ -426,7 +486,7 @@ client.on("interactionCreate", async (interaction) => {
         `${commandName.toUpperCase()}-by-oxaam.txt`;
 
       // ====================================
-      // CREATE FILE
+      // CREATE OUTPUT FILE
       // ====================================
 
       const outputFile =
@@ -455,25 +515,20 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ======================================
-    // NOTHING PROCESSED
+    // RESULT
     // ======================================
 
     if (processedCount === 0) {
-
       return interaction.editReply(
-        "❌ No valid .txt file could be processed."
+        "❌ No valid TXT attachment could be processed."
       );
     }
 
-    // ======================================
-    // SUCCESS
-    // ======================================
-
     await interaction.editReply(
-      `✅ Successfully processed ${processedCount} file(s).\n` +
-      `📁 Latest .txt file selected.\n` +
-      `✂️ First 6 lines replaced with branding.\n` +
-      `💲 Branding added at the end too.\n` +
+      `✅ Latest stock processed successfully!\n` +
+      `✂️ First 6 lines removed.\n` +
+      `💲 Branding added.\n` +
+      `📁 Filename: ${commandName.toUpperCase()}-by-oxaam.txt\n` +
       `📤 Sent to <#${targetChannelId}>.`
     );
 
@@ -486,17 +541,10 @@ client.on("interactionCreate", async (interaction) => {
     console.error(error);
 
     try {
-
       await interaction.editReply(
         "❌ Something went wrong while processing the stock file."
       );
-
     } catch (replyError) {
-
-      console.error(
-        "❌ Could not send error reply:"
-      );
-
       console.error(replyError);
     }
   }
